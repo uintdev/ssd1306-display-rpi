@@ -16,13 +16,13 @@ This displays the following system information:
 - Memory usage
 - Disk usage
 
-## Turning off the display
+### Turning off the display
 
 If you want to turn off the display visually, create a `displayoff` file in the same location as the executable. To turn it back on, remove the file or rerun the executable.
 
-## Showing a brief message
+### Displaying a brief message
 
-To show a temporary message (for example, to indicate a status change), create a `msg.txt` in the same location as the executable, with the message as the text file content. As soon as the message is displayed, the text file will be automatically removed.
+To show a temporary message (for example, to indicate a status change), create a `msg.txt` file in the same location as the executable, with the message as the text file’s content. As soon as the message is displayed, the text file will be automatically removed.
 
 By default, the message display duration is 3 seconds. This is configurable.
 
