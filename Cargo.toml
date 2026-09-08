@@ -1,0 +1,3 @@
+[workspace]
+resolver = "2"
+members = ["ssd1306-driver-rs", "ssd1306-sysinfo-display"]

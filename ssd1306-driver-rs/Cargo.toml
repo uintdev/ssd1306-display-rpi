@@ -1,0 +1,14 @@
+[package]
+name = "ssd1306-driver-rs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+embedded-hal = "1.0"
+embedded-graphics = { version = "0.8.2", optional = true }
+
+[features]
+graphics = ["dep:embedded-graphics"]
+
+[dev-dependencies]
+embedded-hal-mock = { version = "0.11.1", default-features = false, features = ["eh1"] }
