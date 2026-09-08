@@ -51,7 +51,7 @@ To keep the process simple, you should download and compile via the Raspberry Pi
 2. Download and extract, or clone, the repository
 3. Change directory to the root of the repository (where this README file is located)
 4. Run `cargo build --release` (use `cargo build --release -j 1` if you are using a more resource-constrained Raspberry Pi, such as the Raspberry Pi Zero 2 W)
-5. Run `./target/release/sysinfo_display` - you should then see the OLED display light up with updating system information statistics
+5. Run `./target/release/ssd1306-sysinfo-display` - you should then see the OLED display light up with updating system information statistics
 
 ## Additional configuration
 
