@@ -18,9 +18,9 @@ For more information, visit the respective repository directories.
 
 This was tested with a Raspberry Pi Zero 2 W. If you are working with a different platform, further modifications will need to be made, and different instructions may need to be followed for it to function.
 
-### Getting i2c ready
+### Getting I2C ready
 
-The i2c interface first needs to be enabled. You can do this through the `raspi-config` TUI. Alternatively, you can run a command to achieve this.
+The I2C interface first needs to be enabled. You can do this through the `raspi-config` TUI. Alternatively, you can run a command to achieve this.
 
 ```bash
 sudo raspi-config nonint do_i2c 0
@@ -55,4 +55,4 @@ To keep the process simple, you should download and compile via the Raspberry Pi
 
 ## Additional configuration
 
-If your display is not 128x32 (the default), adjust the width and height values under the `disp` variable.
+If your display is not 128x32 or you wish to make adjustments to the system information display, refer to the README found [here](ssd1306-sysinfo-display/README.md).
