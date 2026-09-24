@@ -47,6 +47,17 @@ fn read_load_average() -> String {
         .unwrap_or_default()
 }
 
+// Blank the panel's memory (so nothing stale reappears when it is switched
+// back on), then put the panel to sleep to save power and avoid burn-in.
+fn turn_display_off<I>(display: &mut Ssd1306<I>) -> Result<(), I::Error>
+where
+    I: DisplayInterface,
+{
+    display.clear();
+    display.flush()?;
+    display.off()
+}
+
 fn sleep_checking_display_off<I>(
     display: &mut Ssd1306<I>,
     total: Duration,
@@ -58,8 +69,7 @@ where
     let mut waited: Duration = Duration::ZERO;
     while waited < total {
         if display_off_file.is_file() {
-            display.clear();
-            display.flush()?;
+            turn_display_off(display)?;
             return Ok(true);
         }
         let step: Duration = DISPLAY_OFF_POLL_INTERVAL.min(total - waited);
@@ -130,13 +140,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Keep the display off while the flag file exists
         if display_off_file.is_file() {
             if !display_off_status {
-                display.flush()?;
+                turn_display_off(&mut display)?;
                 display_off_status = true;
             }
             thread::sleep(DISPLAY_OFF_POLL_INTERVAL);
             continue;
         }
-        display_off_status = false;
+        if display_off_status {
+            display.on()?;
+            display_off_status = false;
+        }
 
         // Show a one-off message from msg.txt, if present
         if msg_file.is_file() {
