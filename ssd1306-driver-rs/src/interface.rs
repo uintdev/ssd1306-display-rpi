@@ -12,9 +12,22 @@ pub trait DisplayInterface {
     // Send a single command byte.
     fn command(&mut self, cmd: u8) -> Result<(), Self::Error>;
 
+    // Send a sequence of command bytes (commands and their parameters).
+    // The default sends them one at a time; transports override this to
+    // batch them into fewer bus transactions.
+    fn commands(&mut self, cmds: &[u8]) -> Result<(), Self::Error> {
+        cmds.iter().try_for_each(|&cmd| self.command(cmd))
+    }
+
     // Send a slice of raw display data bytes.
     fn data(&mut self, data: &[u8]) -> Result<(), Self::Error>;
 }
+
+// Maximum payload bytes per I2C write (excluding the control byte). The
+// original Python driver used 16 because of SMBus block-size limits; plain
+// I2C writes (e.g. Linux i2c-dev, used by rppal) have no such limit, and
+// 128 stays under the 255-byte cap common to many microcontroller HALs.
+const I2C_CHUNK_SIZE: usize = 128;
 
 // I2C transport for the display (the common wiring for most SSD1306
 // breakout boards, and the default used by the original Python driver).
@@ -36,6 +49,25 @@ impl<I2C> I2cInterface<I2C> {
     }
 }
 
+impl<I2C> I2cInterface<I2C>
+where
+    I2C: I2c,
+{
+    // Send `bytes` in chunks of up to `I2C_CHUNK_SIZE`, each prefixed with
+    // `control`. With Co = 0 the controller treats everything after the
+    // control byte as a stream, so a chunk may hold several commands (or
+    // split a command from its parameters) without changing the result.
+    fn write_chunked(&mut self, control: u8, bytes: &[u8]) -> Result<(), I2C::Error> {
+        let mut chunk_buf = [0u8; I2C_CHUNK_SIZE + 1];
+        chunk_buf[0] = control;
+        for chunk in bytes.chunks(I2C_CHUNK_SIZE) {
+            chunk_buf[1..=chunk.len()].copy_from_slice(chunk);
+            self.i2c.write(self.address, &chunk_buf[..=chunk.len()])?;
+        }
+        Ok(())
+    }
+}
+
 impl<I2C> DisplayInterface for I2cInterface<I2C>
 where
     I2C: I2c,
@@ -47,18 +79,13 @@ where
         self.i2c.write(self.address, &[0x00, cmd])
     }
 
+    fn commands(&mut self, cmds: &[u8]) -> Result<(), Self::Error> {
+        self.write_chunked(0x00, cmds)
+    }
+
     fn data(&mut self, data: &[u8]) -> Result<(), Self::Error> {
-        // The original driver streams the frame buffer in 16-byte chunks,
-        // each prefixed with the "data" control byte (0x40: Co = 0, D/C = 1).
-        // Chunking keeps each I2C transaction small, which matches common
-        // I2C driver/buffer limits on the Pi and elsewhere.
-        let mut chunk_buf = [0u8; 17];
-        for chunk in data.chunks(16) {
-            chunk_buf[0] = 0x40;
-            chunk_buf[1..=chunk.len()].copy_from_slice(chunk);
-            self.i2c.write(self.address, &chunk_buf[..=chunk.len()])?;
-        }
-        Ok(())
+        // "Data" control byte 0x40: Co = 0, D/C = 1.
+        self.write_chunked(0x40, data)
     }
 }
 
@@ -98,8 +125,12 @@ where
     type Error = SpiInterfaceError<SPI::Error, DC::Error>;
 
     fn command(&mut self, cmd: u8) -> Result<(), Self::Error> {
+        self.commands(&[cmd])
+    }
+
+    fn commands(&mut self, cmds: &[u8]) -> Result<(), Self::Error> {
         self.dc.set_low().map_err(SpiInterfaceError::Pin)?;
-        self.spi.write(&[cmd]).map_err(SpiInterfaceError::Spi)
+        self.spi.write(cmds).map_err(SpiInterfaceError::Spi)
     }
 
     fn data(&mut self, data: &[u8]) -> Result<(), Self::Error> {

@@ -132,44 +132,50 @@ where
         let p = self.size.params();
         let external: bool = self.vcc_state == VccState::External;
 
-        self.interface.command(DISPLAYOFF)?;
-        self.interface.command(SETDISPLAYCLOCKDIV)?;
-        self.interface.command(p.clock_div_ratio)?;
-        self.interface.command(SETMULTIPLEX)?;
-        self.interface.command(p.multiplex)?;
-        self.interface.command(SETDISPLAYOFFSET)?;
-        self.interface.command(0x00)?; // No offset.
-        self.interface.command(SETSTARTLINE)?; // Line #0.
-        self.interface.command(CHARGEPUMP)?;
-        self.interface.command(if external { 0x10 } else { 0x14 })?;
-        self.interface.command(MEMORYMODE)?;
-        self.interface.command(0x00)?; // Act like ks0108.
-        self.interface.command(SEGREMAP | 0x01)?;
-        self.interface.command(COMSCANDEC)?;
-        self.interface.command(SETCOMPINS)?;
-        self.interface.command(p.com_pins)?;
-        self.interface.command(SETCONTRAST)?;
-        self.interface.command(if external {
+        let contrast: u8 = if external {
             p.contrast_external
         } else {
             p.contrast_internal
-        })?;
-        self.interface.command(SETPRECHARGE)?;
-        self.interface.command(if external { 0x22 } else { 0xF1 })?;
-        self.interface.command(SETVCOMDETECT)?;
-        self.interface.command(0x40)?;
-        self.interface.command(DISPLAYALLON_RESUME)?;
-        self.interface.command(NORMALDISPLAY)
+        };
+
+        self.interface.commands(&[
+            DISPLAYOFF,
+            SETDISPLAYCLOCKDIV,
+            p.clock_div_ratio,
+            SETMULTIPLEX,
+            p.multiplex,
+            SETDISPLAYOFFSET,
+            0x00,         // No offset.
+            SETSTARTLINE, // Line #0.
+            CHARGEPUMP,
+            if external { 0x10 } else { 0x14 },
+            MEMORYMODE,
+            0x00, // Act like ks0108.
+            SEGREMAP | 0x01,
+            COMSCANDEC,
+            SETCOMPINS,
+            p.com_pins,
+            SETCONTRAST,
+            contrast,
+            SETPRECHARGE,
+            if external { 0x22 } else { 0xF1 },
+            SETVCOMDETECT,
+            0x40,
+            DISPLAYALLON_RESUME,
+            NORMALDISPLAY,
+        ])
     }
 
     // Push the in-memory frame buffer to the physical display.
     pub fn flush(&mut self) -> Result<(), I::Error> {
-        self.interface.command(COLUMNADDR)?;
-        self.interface.command(0)?; // Column start address (0 = reset).
-        self.interface.command((self.width - 1) as u8)?; // Column end address.
-        self.interface.command(PAGEADDR)?;
-        self.interface.command(0)?; // Page start address (0 = reset).
-        self.interface.command((self.pages - 1) as u8)?; // Page end address.
+        self.interface.commands(&[
+            COLUMNADDR,
+            0,                      // Column start address (0 = reset).
+            (self.width - 1) as u8, // Column end address.
+            PAGEADDR,
+            0,                      // Page start address (0 = reset).
+            (self.pages - 1) as u8, // Page end address.
+        ])?;
         self.interface.data(&self.buffer)
     }
 
@@ -232,8 +238,7 @@ where
 
     // Set display contrast, from 0 to 255.
     pub fn set_contrast(&mut self, contrast: u8) -> Result<(), I::Error> {
-        self.interface.command(SETCONTRAST)?;
-        self.interface.command(contrast)
+        self.interface.commands(&[SETCONTRAST, contrast])
     }
 
     // Dim the display, or restore normal brightness if `dim` is `false`.

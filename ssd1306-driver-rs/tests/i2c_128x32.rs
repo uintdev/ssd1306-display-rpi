@@ -7,34 +7,48 @@ fn cmd(addr: u8, byte: u8) -> I2cTransaction {
     I2cTransaction::write(addr, vec![0x00, byte])
 }
 
+// Several command bytes batched into one write behind a single 0x00
+// control byte.
+fn cmds(addr: u8, bytes: &[u8]) -> I2cTransaction {
+    let mut buf: Vec<u8> = vec![0x00];
+    buf.extend_from_slice(bytes);
+    I2cTransaction::write(addr, buf)
+}
+
 #[test]
 fn init_sequence_matches_128x32_switchcap() {
     let addr: u8 = DEFAULT_I2C_ADDRESS;
     let expected = vec![
-        cmd(addr, 0xAE), // DISPLAYOFF
-        cmd(addr, 0xD5), // SETDISPLAYCLOCKDIV
-        cmd(addr, 0x80),
-        cmd(addr, 0xA8), // SETMULTIPLEX
-        cmd(addr, 0x1F), // 128x32-specific multiplex ratio
-        cmd(addr, 0xD3), // SETDISPLAYOFFSET
-        cmd(addr, 0x00),
-        cmd(addr, 0x40), // SETSTARTLINE | 0
-        cmd(addr, 0x8D), // CHARGEPUMP
-        cmd(addr, 0x14), // switch-cap
-        cmd(addr, 0x20), // MEMORYMODE
-        cmd(addr, 0x00),
-        cmd(addr, 0xA1), // SEGREMAP | 1
-        cmd(addr, 0xC8), // COMSCANDEC
-        cmd(addr, 0xDA), // SETCOMPINS
-        cmd(addr, 0x02), // 128x32-specific COM pins config
-        cmd(addr, 0x81), // SETCONTRAST
-        cmd(addr, 0x8F), // 128x32 contrast (same for internal/external)
-        cmd(addr, 0xD9), // SETPRECHARGE
-        cmd(addr, 0xF1),
-        cmd(addr, 0xDB), // SETVCOMDETECT
-        cmd(addr, 0x40),
-        cmd(addr, 0xA4), // DISPLAYALLON_RESUME
-        cmd(addr, 0xA6), // NORMALDISPLAY
+        // Init sequence, sent as one batched write.
+        cmds(
+            addr,
+            &[
+                0xAE, // DISPLAYOFF
+                0xD5, // SETDISPLAYCLOCKDIV
+                0x80, // clock divide ratio
+                0xA8, // SETMULTIPLEX
+                0x1F, // 128x32-specific multiplex ratio
+                0xD3, // SETDISPLAYOFFSET
+                0x00, // no offset
+                0x40, // SETSTARTLINE | 0
+                0x8D, // CHARGEPUMP
+                0x14, // switch-cap
+                0x20, // MEMORYMODE
+                0x00, // horizontal addressing
+                0xA1, // SEGREMAP | 1
+                0xC8, // COMSCANDEC
+                0xDA, // SETCOMPINS
+                0x02, // 128x32-specific COM pins config
+                0x81, // SETCONTRAST
+                0x8F, // 128x32 contrast (same for internal/external)
+                0xD9, // SETPRECHARGE
+                0xF1, // precharge period
+                0xDB, // SETVCOMDETECT
+                0x40, // VCOMH deselect level
+                0xA4, // DISPLAYALLON_RESUME
+                0xA6, // NORMALDISPLAY
+            ],
+        ),
         cmd(addr, 0xAF), // DISPLAYON
     ];
 
@@ -58,30 +72,36 @@ fn init_sequence_matches_128x32_external_vcc() {
     // size.rs::SizeParams for 128x32).
     let addr: u8 = DEFAULT_I2C_ADDRESS;
     let expected = vec![
-        cmd(addr, 0xAE), // DISPLAYOFF
-        cmd(addr, 0xD5), // SETDISPLAYCLOCKDIV
-        cmd(addr, 0x80),
-        cmd(addr, 0xA8), // SETMULTIPLEX
-        cmd(addr, 0x1F),
-        cmd(addr, 0xD3), // SETDISPLAYOFFSET
-        cmd(addr, 0x00),
-        cmd(addr, 0x40), // SETSTARTLINE | 0
-        cmd(addr, 0x8D), // CHARGEPUMP
-        cmd(addr, 0x10), // external VCC
-        cmd(addr, 0x20), // MEMORYMODE
-        cmd(addr, 0x00),
-        cmd(addr, 0xA1), // SEGREMAP | 1
-        cmd(addr, 0xC8), // COMSCANDEC
-        cmd(addr, 0xDA), // SETCOMPINS
-        cmd(addr, 0x02),
-        cmd(addr, 0x81), // SETCONTRAST
-        cmd(addr, 0x8F),
-        cmd(addr, 0xD9), // SETPRECHARGE
-        cmd(addr, 0x22), // external VCC
-        cmd(addr, 0xDB), // SETVCOMDETECT
-        cmd(addr, 0x40),
-        cmd(addr, 0xA4), // DISPLAYALLON_RESUME
-        cmd(addr, 0xA6), // NORMALDISPLAY
+        // Init sequence, sent as one batched write.
+        cmds(
+            addr,
+            &[
+                0xAE, // DISPLAYOFF
+                0xD5, // SETDISPLAYCLOCKDIV
+                0x80, // clock divide ratio
+                0xA8, // SETMULTIPLEX
+                0x1F, // multiplex ratio
+                0xD3, // SETDISPLAYOFFSET
+                0x00, // no offset
+                0x40, // SETSTARTLINE | 0
+                0x8D, // CHARGEPUMP
+                0x10, // external VCC
+                0x20, // MEMORYMODE
+                0x00, // horizontal addressing
+                0xA1, // SEGREMAP | 1
+                0xC8, // COMSCANDEC
+                0xDA, // SETCOMPINS
+                0x02, // COM pins config
+                0x81, // SETCONTRAST
+                0x8F, // contrast
+                0xD9, // SETPRECHARGE
+                0x22, // external VCC
+                0xDB, // SETVCOMDETECT
+                0x40, // VCOMH deselect level
+                0xA4, // DISPLAYALLON_RESUME
+                0xA6, // NORMALDISPLAY
+            ],
+        ),
         cmd(addr, 0xAF), // DISPLAYON
     ];
 
