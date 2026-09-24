@@ -72,7 +72,6 @@ pub struct Ssd1306<I, RST = NoResetPin> {
     size: DisplaySize,
     width: u32,
     height: u32,
-    pages: usize,
     buffer: Vec<u8>,
     vcc_state: VccState,
 }
@@ -107,7 +106,6 @@ where
             size,
             width,
             height,
-            pages,
             buffer,
             vcc_state: VccState::SwitchCap,
         }
@@ -175,8 +173,8 @@ where
             0,                      // Column start address (0 = reset).
             (self.width - 1) as u8, // Column end address.
             PAGEADDR,
-            0,                      // Page start address (0 = reset).
-            (self.pages - 1) as u8, // Page end address.
+            0,                           // Page start address (0 = reset).
+            (self.height / 8 - 1) as u8, // Page end address.
         ])?;
         self.interface.data(&self.buffer)
     }
@@ -184,7 +182,7 @@ where
     /// Zero the in-memory frame buffer. Call [`Ssd1306::flush`] afterwards
     /// to clear the physical display.
     pub fn clear(&mut self) {
-        self.buffer.iter_mut().for_each(|b| *b = 0);
+        self.buffer.fill(0);
     }
 
     /// Locate a pixel in the frame buffer: the byte index and the bit mask
