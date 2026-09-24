@@ -21,16 +21,14 @@ fn cmd(byte: u8) -> I2cTransaction {
     I2cTransaction::write(ADDR, vec![0x00, byte])
 }
 
-// Several command bytes batched into one write behind a single 0x00
-// control byte.
+// Several command bytes batched into one write.
 fn cmds(bytes: &[u8]) -> I2cTransaction {
     let mut buf: Vec<u8> = vec![0x00];
     buf.extend_from_slice(bytes);
     I2cTransaction::write(ADDR, buf)
 }
 
-// Run `f` against a display backed by an I2C mock that expects exactly
-// `transactions`, then assert every expected transaction happened.
+// Run `f` against a mocked display that expects exactly `transactions`.
 fn with_display(
     size: DisplaySize,
     transactions: &[I2cTransaction],
@@ -43,8 +41,7 @@ fn with_display(
     interface.release().done();
 }
 
-// Normal (undimmed) contrast for a panel size and VCC source. Only 128x64
-// differs by VCC source: 0xCF internal vs 0x9F external.
+// Normal (undimmed) contrast. Only 128x64 differs by VCC source.
 fn expected_contrast(e: &Expected, vcc: VccState) -> u8 {
     if vcc == VccState::External {
         e.contrast_external
@@ -53,9 +50,7 @@ fn expected_contrast(e: &Expected, vcc: VccState) -> u8 {
     }
 }
 
-// Transactions sent by `init()`. With an external VCC supply, the
-// charge-pump, precharge, and contrast bytes all switch to their "external"
-// values.
+// Transactions sent by `init()`.
 fn init_transactions(e: &Expected, vcc: VccState) -> Vec<I2cTransaction> {
     let external: bool = vcc == VccState::External;
     vec![
@@ -97,8 +92,7 @@ fn check_init_sequence(size: DisplaySize, e: &Expected, vcc: VccState) {
 }
 
 fn check_dim(size: DisplaySize, e: &Expected, vcc: VccState) {
-    // Dimming drops contrast to 0; undimming restores the same size- and
-    // VCC-specific contrast that init() set.
+    // Dimming sets contrast to 0; undimming restores init()'s contrast.
     let mut expected = init_transactions(e, vcc);
     expected.push(cmds(&[0x81, 0x00]));
     expected.push(cmds(&[0x81, expected_contrast(e, vcc)]));
@@ -127,31 +121,71 @@ fn check_dim_custom_contrast(size: DisplaySize, e: &Expected) {
     });
 }
 
+// Transactions for flushing pages `first..=last`: the address window, then
+// the data in chunks of up to 128 bytes.
+fn flush_transactions(e: &Expected, first: usize, last: usize, data: &[u8]) -> Vec<I2cTransaction> {
+    let mut transactions = vec![cmds(&[
+        0x21,                // COLUMNADDR
+        0x00,                // start column
+        (e.width - 1) as u8, // end column
+        0x22,                // PAGEADDR
+        first as u8,         // start page
+        last as u8,          // end page
+    ])];
+    transactions.extend(data.chunks(128).map(|chunk| {
+        let mut buf: Vec<u8> = vec![0x40];
+        buf.extend_from_slice(chunk);
+        I2cTransaction::write(ADDR, buf)
+    }));
+    transactions
+}
+
 fn check_flush(size: DisplaySize, e: &Expected) {
     // A distinct value per byte, so misordered or dropped data is caught.
     let len: usize = (e.width * e.height / 8) as usize;
     let frame: Vec<u8> = (0..len).map(|i| i as u8).collect();
 
-    // Address window covering the whole panel, sent as one batched write.
-    let mut expected = vec![cmds(&[
-        0x21,                     // COLUMNADDR
-        0x00,                     // start column
-        (e.width - 1) as u8,      // end column
-        0x22,                     // PAGEADDR
-        0x00,                     // start page
-        (e.height / 8 - 1) as u8, // end page
-    ])];
-    // Then the frame in chunks of up to 128 bytes, each behind a 0x40
-    // (data) control byte. 96x16's 192-byte frame ends in a partial chunk.
-    expected.extend(frame.chunks(128).map(|chunk| {
-        let mut buf: Vec<u8> = vec![0x40];
-        buf.extend_from_slice(chunk);
-        I2cTransaction::write(ADDR, buf)
-    }));
+    // The whole panel. 96x16's 192-byte frame ends in a partial chunk.
+    let expected = flush_transactions(e, 0, (e.height / 8 - 1) as usize, &frame);
 
     with_display(size, &expected, |display| {
         display.set_buffer(&frame).unwrap();
         display.flush().unwrap();
+    });
+}
+
+fn check_flush_changed(size: DisplaySize, e: &Expected) {
+    let width: usize = e.width as usize;
+    let last: usize = (e.height / 8 - 1) as usize;
+    // What the panel should hold after each step.
+    let mut frame: Vec<u8> = vec![0u8; width * (last + 1)];
+
+    // 1. Panel contents unknown: the whole (blank) frame is sent.
+    let mut expected = flush_transactions(e, 0, last, &frame);
+    // 2. Nothing changed: nothing is sent.
+    // 3. A pixel in the last page (x = 5, y % 8 == 1): only that page is sent.
+    frame[last * width + 5] = 0b0000_0010;
+    expected.extend(flush_transactions(e, last, last, &frame[last * width..]));
+    // 4. Changes in the first and last pages: every page between is sent.
+    frame[0] = 0b0000_0001;
+    frame[last * width + 5] = 0;
+    expected.extend(flush_transactions(e, 0, last, &frame));
+    // 5. After init, the panel's contents are unknown again: whole frame.
+    expected.extend(init_transactions(e, VccState::SwitchCap));
+    expected.extend(flush_transactions(e, 0, last, &frame));
+
+    with_display(size, &expected, |display| {
+        display.flush_changed().unwrap();
+        display.flush_changed().unwrap();
+        display.set_pixel(5, e.height - 7, true);
+        display.flush_changed().unwrap();
+        display.set_pixel(0, 0, true);
+        display.set_pixel(5, e.height - 7, false);
+        display.flush_changed().unwrap();
+        display
+            .init(VccState::SwitchCap, &mut NoopDelay::new())
+            .unwrap();
+        display.flush_changed().unwrap();
     });
 }
 
@@ -165,9 +199,8 @@ fn check_dimensions_and_buffer_size(size: DisplaySize, e: &Expected) {
 }
 
 fn check_set_pixel_bit_packing(size: DisplaySize, e: &Expected) {
-    // Each byte is one vertical column of 8 pixels within a "page",
-    // LSB = top pixel.
-    // Use the last page so the page offset is exercised on every size.
+    // Each byte is a vertical column of 8 pixels, LSB = top. Use the last
+    // page so the page offset is exercised.
     let (x, y): (u32, u32) = (5, e.height - 7);
     let page: usize = (e.height / 8 - 1) as usize;
     let index: usize = page * e.width as usize + x as usize;
@@ -186,8 +219,7 @@ fn check_set_pixel_bit_packing(size: DisplaySize, e: &Expected) {
 }
 
 fn check_set_pixel_out_of_bounds_is_ignored(size: DisplaySize, e: &Expected) {
-    // Off-panel pixels must be a silent no-op rather than an out-of-bounds
-    // panic.
+    // Off-panel pixels must be ignored, not panic.
     with_display(size, &[], |display| {
         display.set_pixel(0, e.height, true);
         display.set_pixel(e.width, 0, true);
@@ -249,6 +281,11 @@ macro_rules! size_tests {
             #[test]
             fn flush_sends_address_window_and_frame() {
                 check_flush(SIZE, &EXPECTED);
+            }
+
+            #[test]
+            fn flush_changed_sends_only_changed_pages() {
+                check_flush_changed(SIZE, &EXPECTED);
             }
 
             #[test]

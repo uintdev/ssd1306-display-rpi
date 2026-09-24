@@ -1,11 +1,12 @@
 [package]
 name = "ssd1306-sysinfo-display"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 description = "Port of Adafruit's SSD1306 Python driver and sysinfo example"
 
 [dependencies]
 ssd1306-driver-rs = { path = "../ssd1306-driver-rs", features = ["graphics"] }
 embedded-graphics = { workspace = true }
+libc = "0.2.189"
 rppal = { version = "0.22.1", features = ["embedded-hal"] }
 signal-hook = "0.4.4"

@@ -30,8 +30,7 @@ const DISPLAY_OFF_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const MESSAGE_DURATION: Duration = Duration::from_secs(3);
 // Delay between system information refreshes.
 const REFRESH_INTERVAL: Duration = Duration::from_millis(500);
-// How often to re-query values that rarely change (IP address, disk usage).
-// Time, CPU load and memory are still refreshed on every loop.
+// How often to re-query the IP address and disk usage, which rarely change.
 const SLOW_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
 // How often to try reinitialising the display after an I2C error.
 const I2C_RETRY_INTERVAL: Duration = Duration::from_secs(2);
@@ -45,8 +44,7 @@ fn run_shell(cmd: &str) -> String {
         .unwrap_or_default()
 }
 
-// 1-minute load average: the first field of /proc/loadavg. Read directly
-// rather than via `cut` to avoid spawning a shell every refresh.
+// 1-minute load average (the first field of /proc/loadavg).
 fn read_load_average() -> String {
     fs::read_to_string("/proc/loadavg")
         .ok()
@@ -54,8 +52,48 @@ fn read_load_average() -> String {
         .unwrap_or_default()
 }
 
-// Remove `path`, logging errors rather than failing on them. A file that's
-// already gone counts as removed.
+// POSIX, but not declared by the `libc` crate.
+unsafe extern "C" {
+    fn tzset();
+}
+
+// Local time as HH:MM, like `date +%H:%M`.
+fn read_local_time() -> String {
+    // SAFETY: `localtime_r` gets valid pointers to locals; the other calls
+    // have no preconditions.
+    unsafe {
+        // Pick up timezone changes made while running.
+        tzset();
+        let now: libc::time_t = libc::time(std::ptr::null_mut());
+        let mut tm: libc::tm = std::mem::zeroed();
+        if libc::localtime_r(&now, &mut tm).is_null() {
+            return String::new();
+        }
+        format!("{:02}:{:02}", tm.tm_hour, tm.tm_min)
+    }
+}
+
+// Memory usage from `free -m`, as "Mem: <used> / <total> MB  <percent>%".
+fn read_memory_usage() -> String {
+    let Ok(output) = Command::new("free").arg("-m").output() else {
+        return String::new();
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let fields: Vec<&str> = stdout
+        .lines()
+        .nth(1)
+        .unwrap_or_default()
+        .split_whitespace()
+        .collect();
+    let (Some(total), Some(used)) = (fields.get(1), fields.get(2)) else {
+        return String::new();
+    };
+    let percent: f64 =
+        used.parse::<f64>().unwrap_or(0.0) * 100.0 / total.parse::<f64>().unwrap_or(0.0);
+    format!("Mem: {used} / {total} MB  {percent:.2}%")
+}
+
+// Remove `path`, logging any error. A missing file counts as removed.
 fn try_remove_file(path: &Path) -> bool {
     match fs::remove_file(path) {
         Ok(()) => true,
@@ -71,14 +109,13 @@ fn modified_time(path: &Path) -> Option<SystemTime> {
     fs::metadata(path).and_then(|m| m.modified()).ok()
 }
 
-// Blank the panel's memory (so nothing stale reappears when it is switched
-// back on), then put the panel to sleep to save power and avoid burn-in.
+// Blank the panel and put it to sleep (saves power, avoids burn-in).
 fn turn_display_off<I>(display: &mut Ssd1306<I>) -> Result<(), I::Error>
 where
     I: DisplayInterface,
 {
     display.clear();
-    display.flush()?;
+    display.flush_changed()?;
     display.off()
 }
 
@@ -107,9 +144,8 @@ where
 fn main() -> Result<(), Box<dyn Error>> {
     println!("--- SSD1306 SysInfo Display ---\n");
 
-    // Stop cleanly on SIGTERM/SIGINT/SIGQUIT (e.g. `systemctl stop`, Ctrl-C)
-    // so the panel can be switched off instead of freezing on the last
-    // frame. A second signal exits immediately, in case shutdown hangs.
+    // Exit cleanly on SIGTERM/SIGINT/SIGQUIT so the display can be turned
+    // off. A second signal exits immediately.
     let shutdown: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
     for &signal in TERM_SIGNALS {
         flag::register_conditional_shutdown(signal, 1, Arc::clone(&shutdown))?;
@@ -144,9 +180,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     display.init(VccState::SwitchCap, &mut Delay)?;
 
     while let Err(err) = run(&mut display, &display_off_file, &msg_file, &shutdown) {
-        // An I2C error usually means the panel was disconnected or lost
-        // power (which also wipes its configuration), so keep trying to
-        // reinitialise it rather than exiting. Anything else is fatal.
+        // On an I2C error (e.g. the panel lost power), reinitialise until it
+        // responds. Other errors are fatal.
         let Some(i2c_err) = err.downcast_ref::<rppal::i2c::Error>() else {
             return Err(err);
         };
@@ -154,7 +189,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         loop {
             thread::sleep(I2C_RETRY_INTERVAL);
             if shutdown.load(Ordering::Relaxed) {
-                // The display isn't responding, so there's nothing to turn off.
+                // The display isn't responding, so leave it as is.
                 println!("Shutting down");
                 return Ok(());
             }
@@ -165,15 +200,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    // Shutdown requested: switch the panel off rather than leaving the last
-    // frame on screen.
+    // Don't leave the last frame on screen.
     println!("Shutting down");
     turn_display_off(&mut display)?;
     Ok(())
 }
 
-// Draw the status screen (or a message) in a loop. Returns `Ok` once
-// shutdown is requested, or the first error.
+// Draw frames until shutdown is requested or an error occurs.
 fn run(
     display: &mut Ssd1306<I2cInterface<I2c>>,
     display_off_file: &Path,
@@ -204,8 +237,8 @@ fn run(
     let mut ip: String = String::new();
     let mut disk: String = String::new();
     let mut last_slow_refresh: Option<Instant> = None;
-    // Modification time of a msg.txt that was shown but couldn't be removed,
-    // so the same message isn't shown again on every loop.
+    // Modification time of a shown msg.txt that couldn't be removed, so it
+    // isn't shown again.
     let mut undeletable_msg_modified: Option<SystemTime> = None;
 
     while !shutdown.load(Ordering::Relaxed) {
@@ -237,8 +270,7 @@ fn run(
                 .trim_end_matches(['\r', '\t', ' '])
                 .to_string();
 
-            // Monospace fonts draw one glyph per character (non-ASCII ones
-            // as a replacement glyph), so count characters, not bytes.
+            // The fonts are monospace, so count characters, not bytes.
             let font = if content.chars().count() >= 20 {
                 message_font_small
             } else {
@@ -247,7 +279,7 @@ fn run(
 
             Text::with_text_style(&content, Point::new(width / 2, height / 2), font, centered)
                 .draw(display)?;
-            display.flush()?;
+            display.flush_changed()?;
 
             undeletable_msg_modified = if try_remove_file(msg_file) {
                 None
@@ -260,11 +292,9 @@ fn run(
         }
 
         // Monitoring information
-        let time_str: String = run_shell("date +\"%H:%M\"");
+        let time_str: String = read_local_time();
         let cpu: String = read_load_average();
-        let mem_usage: String = run_shell(
-            "free -m | awk 'NR==2{printf \"Mem: %s / %s MB  %.2f%%\", $3,$2,$3*100/$2 }'",
-        );
+        let mem_usage: String = read_memory_usage();
         // Also retry while the IP is empty (e.g. network not up yet at boot).
         if ip.is_empty() || last_slow_refresh.is_none_or(|t| t.elapsed() >= SLOW_REFRESH_INTERVAL) {
             ip = run_shell("hostname -I | cut -d' ' -f1");
@@ -284,7 +314,8 @@ fn run(
             Text::with_text_style(text, position, status_font, top_left).draw(display)?;
         }
 
-        display.flush()?;
+        // Only rows that changed are sent (often none).
+        display.flush_changed()?;
         display_off_status |=
             sleep_checking_display_off(display, REFRESH_INTERVAL, display_off_file, shutdown)?;
     }

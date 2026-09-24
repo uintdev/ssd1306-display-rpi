@@ -104,6 +104,8 @@ pub struct Ssd1306<I, RST = NoResetPin> {
     vcc_state: VccState,
     /// Normal (undimmed) contrast, restored by `dim(false)`.
     contrast: u8,
+    /// Frame last sent to the panel, or `None` if its contents are unknown.
+    sent: Option<Vec<u8>>,
 }
 
 impl<I> Ssd1306<I, NoResetPin>
@@ -139,6 +141,7 @@ where
             buffer,
             vcc_state: VccState::SwitchCap,
             contrast: size.params().contrast_internal,
+            sent: None,
         }
     }
 
@@ -172,7 +175,7 @@ where
     fn initialize(&mut self) -> Result<(), I::Error> {
         let p = self.size.params();
         let external: bool = self.vcc_state == VccState::External;
-        // Initialization resets any contrast set with `set_contrast`.
+        // Discards any contrast set with `set_contrast`.
         self.contrast = self.default_contrast();
         let contrast: u8 = self.contrast;
 
@@ -206,15 +209,50 @@ where
 
     /// Push the in-memory frame buffer to the physical display.
     pub fn flush(&mut self) -> Result<(), I::Error> {
-        self.interface.commands(&[
-            COLUMNADDR,
-            0,                      // Column start address (0 = reset).
-            (self.width - 1) as u8, // Column end address.
-            PAGEADDR,
-            0,                           // Page start address (0 = reset).
-            (self.height / 8 - 1) as u8, // Page end address.
-        ])?;
-        self.interface.data(&self.buffer)
+        self.send_pages(0, self.height as usize / 8 - 1)
+    }
+
+    /// Like [`Ssd1306::flush`], but only sends the pages (8-pixel rows) that
+    /// changed since the last flush. Sends the whole frame if the panel's
+    /// contents are unknown: before the first flush, after
+    /// [`Ssd1306::init`], or after a failed flush.
+    pub fn flush_changed(&mut self) -> Result<(), I::Error> {
+        let range: Option<(usize, usize)> = match &self.sent {
+            Some(sent) => changed_pages(&self.buffer, sent, self.width as usize),
+            None => Some((0, self.height as usize / 8 - 1)),
+        };
+        match range {
+            Some((first, last)) => self.send_pages(first, last),
+            None => Ok(()),
+        }
+    }
+
+    /// Send pages `first..=last` and record what was sent.
+    fn send_pages(&mut self, first: usize, last: usize) -> Result<(), I::Error> {
+        let width: usize = self.width as usize;
+        let range = first * width..(last + 1) * width;
+        let result = self
+            .interface
+            .commands(&[
+                COLUMNADDR,
+                0,                      // Column start address (0 = reset).
+                (self.width - 1) as u8, // Column end address.
+                PAGEADDR,
+                first as u8, // Page start address.
+                last as u8,  // Page end address.
+            ])
+            .and_then(|()| self.interface.data(&self.buffer[range.clone()]));
+
+        if result.is_err() {
+            // The panel may hold a partially written frame.
+            self.sent = None;
+        } else if let Some(sent) = self.sent.as_mut() {
+            sent[range.clone()].copy_from_slice(&self.buffer[range]);
+        } else if range.len() == self.buffer.len() {
+            self.sent = Some(self.buffer.clone());
+        }
+        // A partial send with nothing recorded leaves the rest unknown.
+        result
     }
 
     /// Zero the in-memory frame buffer. Call [`Ssd1306::flush`] afterwards
@@ -355,6 +393,8 @@ where
         vcc_state: VccState,
         delay: &mut impl DelayNs,
     ) -> Result<(), InitError<I::Error, RST::Error>> {
+        // The panel's memory is unknown after a reset.
+        self.sent = None;
         self.vcc_state = vcc_state;
         self.reset(delay).map_err(InitError::Pin)?;
         self.initialize().map_err(InitError::Interface)?;
@@ -362,4 +402,16 @@ where
             .command(DISPLAYON)
             .map_err(InitError::Interface)
     }
+}
+
+/// First and last page that differ between two frames, or `None` if they are
+/// identical.
+fn changed_pages(now: &[u8], before: &[u8], width: usize) -> Option<(usize, usize)> {
+    let mut changed = now
+        .chunks(width)
+        .zip(before.chunks(width))
+        .map(|(a, b)| a != b);
+    let first: usize = changed.clone().position(|c| c)?;
+    let last: usize = changed.rposition(|c| c)?;
+    Some((first, last))
 }
