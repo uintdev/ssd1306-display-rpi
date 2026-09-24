@@ -6,6 +6,6 @@ mod display;
 #[cfg(feature = "graphics")]
 mod graphics;
 
-pub use display::{BufferError, NoResetPin, Ssd1306, VccState};
+pub use display::{BufferError, InitError, NoResetPin, Ssd1306, VccState};
 pub use interface::{DisplayInterface, I2cInterface, SpiInterface, SpiInterfaceError};
 pub use size::DisplaySize;

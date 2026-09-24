@@ -1,7 +1,8 @@
+use embedded_hal::digital::{ErrorKind, ErrorType, OutputPin};
 use embedded_hal_mock::eh1::delay::NoopDelay;
 use embedded_hal_mock::eh1::i2c::{Mock as I2cMock, Transaction as I2cTransaction};
 use ssd1306_driver_rs::command::DEFAULT_I2C_ADDRESS;
-use ssd1306_driver_rs::{BufferError, DisplaySize, I2cInterface, Ssd1306, VccState};
+use ssd1306_driver_rs::{BufferError, DisplaySize, I2cInterface, InitError, Ssd1306, VccState};
 
 const ADDR: u8 = DEFAULT_I2C_ADDRESS;
 
@@ -292,3 +293,34 @@ size_tests!(
         contrast_external: 0x8F,
     }
 );
+
+// A reset pin whose every operation fails.
+struct FailingPin;
+
+impl ErrorType for FailingPin {
+    type Error = ErrorKind;
+}
+
+impl OutputPin for FailingPin {
+    fn set_low(&mut self) -> Result<(), Self::Error> {
+        Err(ErrorKind::Other)
+    }
+
+    fn set_high(&mut self) -> Result<(), Self::Error> {
+        Err(ErrorKind::Other)
+    }
+}
+
+#[test]
+fn init_reports_reset_pin_error_without_touching_the_bus() {
+    // The mock expects no transactions: init must stop at the failed reset.
+    let mock = I2cMock::new(&[]);
+    let interface = I2cInterface::new(mock, ADDR);
+    let mut display = Ssd1306::new_with_reset(interface, DisplaySize::Size128x32, FailingPin);
+
+    let result = display.init(VccState::SwitchCap, &mut NoopDelay::new());
+    assert!(matches!(result, Err(InitError::Pin(ErrorKind::Other))));
+
+    let (interface, _reset_pin) = display.release();
+    interface.release().done();
+}

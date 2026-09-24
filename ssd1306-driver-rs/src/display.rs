@@ -62,6 +62,36 @@ impl core::fmt::Display for BufferError {
 
 impl std::error::Error for BufferError {}
 
+/// Error returned by [`Ssd1306::init`], distinguishing transport errors from
+/// reset pin errors.
+#[derive(Debug)]
+pub enum InitError<InterfaceError, PinError> {
+    /// Sending the initialization sequence failed.
+    Interface(InterfaceError),
+    /// Driving the reset pin failed.
+    Pin(PinError),
+}
+
+impl<IE, PE> core::fmt::Display for InitError<IE, PE>
+where
+    IE: core::fmt::Display,
+    PE: core::fmt::Display,
+{
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            InitError::Interface(e) => write!(f, "display interface error: {e}"),
+            InitError::Pin(e) => write!(f, "reset pin error: {e}"),
+        }
+    }
+}
+
+impl<IE, PE> std::error::Error for InitError<IE, PE>
+where
+    IE: std::error::Error,
+    PE: std::error::Error,
+{
+}
+
 /// `I` is the transport ([`crate::I2cInterface`] or [`crate::SpiInterface`])
 /// and `RST` is the (optional) reset pin's type.
 pub struct Ssd1306<I, RST = NoResetPin> {
@@ -299,21 +329,28 @@ where
     /// Pulse the reset pin (high, then low for 10ms, then high again). A
     /// no-op if this display was constructed with
     /// [`Ssd1306::new_without_reset`].
-    pub fn reset(&mut self, delay: &mut impl DelayNs) {
+    pub fn reset(&mut self, delay: &mut impl DelayNs) -> Result<(), RST::Error> {
         if let Some(rst) = self.reset_pin.as_mut() {
-            let _ = rst.set_high();
+            rst.set_high()?;
             delay.delay_ms(1);
-            let _ = rst.set_low();
+            rst.set_low()?;
             delay.delay_ms(10);
-            let _ = rst.set_high();
+            rst.set_high()?;
         }
+        Ok(())
     }
 
     /// Reset, run the size-specific initialization sequence, and turn the display on.
-    pub fn init(&mut self, vcc_state: VccState, delay: &mut impl DelayNs) -> Result<(), I::Error> {
+    pub fn init(
+        &mut self,
+        vcc_state: VccState,
+        delay: &mut impl DelayNs,
+    ) -> Result<(), InitError<I::Error, RST::Error>> {
         self.vcc_state = vcc_state;
-        self.reset(delay);
-        self.initialize()?;
-        self.interface.command(DISPLAYON)
+        self.reset(delay).map_err(InitError::Pin)?;
+        self.initialize().map_err(InitError::Interface)?;
+        self.interface
+            .command(DISPLAYON)
+            .map_err(InitError::Interface)
     }
 }
