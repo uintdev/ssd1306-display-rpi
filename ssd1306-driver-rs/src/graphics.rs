@@ -37,4 +37,12 @@ where
         }
         Ok(())
     }
+
+    // Fill the whole frame buffer directly instead of going pixel by pixel
+    // through `draw_iter` (the default implementation).
+    fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
+        let fill: u8 = if color.is_on() { 0xFF } else { 0x00 };
+        self.buffer_mut().fill(fill);
+        Ok(())
+    }
 }
