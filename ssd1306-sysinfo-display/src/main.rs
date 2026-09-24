@@ -214,7 +214,9 @@ fn run(
                 .trim_end_matches(['\r', '\t', ' '])
                 .to_string();
 
-            let font = if content.len() >= 20 {
+            // Monospace fonts draw one glyph per character (non-ASCII ones
+            // as a replacement glyph), so count characters, not bytes.
+            let font = if content.chars().count() >= 20 {
                 message_font_small
             } else {
                 message_font_normal
