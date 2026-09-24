@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use embedded_graphics::{
     mono_font::{
@@ -21,6 +21,9 @@ use ssd1306_driver_rs::{
 };
 
 const DISPLAY_OFF_POLL_INTERVAL: Duration = Duration::from_millis(100);
+// How often to re-query values that rarely change (IP address, disk usage).
+// Time, CPU load and memory are still refreshed on every loop.
+const SLOW_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
 
 fn run_shell(cmd: &str) -> String {
     Command::new("sh")
@@ -114,6 +117,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut display_off_status: bool = false;
 
+    let mut ip: String = String::new();
+    let mut disk: String = String::new();
+    let mut last_slow_refresh: Option<Instant> = None;
+
     loop {
         display.clear();
 
@@ -159,13 +166,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Monitoring information
         let time_str: String = run_shell("date +\"%H:%M\"");
-        let ip: String = run_shell("hostname -I | cut -d' ' -f1");
         let cpu: String = read_load_average();
         let mem_usage: String = run_shell(
             "free -m | awk 'NR==2{printf \"Mem: %s / %s MB  %.2f%%\", $3,$2,$3*100/$2 }'",
         );
-        let disk: String =
-            run_shell("df -h / | awk '$NF==\"/\"{printf \"Disk: %d / %d GB  %s\", $3,$2,$5}'");
+        // Also retry while the IP is empty (e.g. network not up yet at boot).
+        if ip.is_empty()
+            || last_slow_refresh.is_none_or(|t| t.elapsed() >= SLOW_REFRESH_INTERVAL)
+        {
+            ip = run_shell("hostname -I | cut -d' ' -f1");
+            disk = run_shell(
+                "df -h / | awk '$NF==\"/\"{printf \"Disk: %d / %d GB  %s\", $3,$2,$5}'",
+            );
+            last_slow_refresh = Some(Instant::now());
+        }
 
         Text::with_text_style(&time_str, Point::new(width - 30, 0), status_font, top_left)
             .draw(&mut display)?;
