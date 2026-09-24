@@ -1,5 +1,5 @@
-// Optional [`embedded-graphics`](https://docs.rs/embedded-graphics) support,
-// enabled with the `graphics` feature.
+//! Optional [`embedded-graphics`](https://docs.rs/embedded-graphics) support,
+//! enabled with the `graphics` feature.
 
 use crate::display::Ssd1306;
 use crate::interface::DisplayInterface;

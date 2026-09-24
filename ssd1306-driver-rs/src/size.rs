@@ -1,17 +1,17 @@
-// Physical display size variants
+//! Physical display size variants
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DisplaySize {
-    // 128x64 pixels (the most common SSD1306 module).
+    /// 128x64 pixels (the most common SSD1306 module).
     Size128x64,
-    // 128x32 pixels.
+    /// 128x32 pixels.
     Size128x32,
-    // 96x16 pixels.
+    /// 96x16 pixels.
     Size96x16,
 }
 
-// Register values that differ between panel sizes, pulled out of
-// `_initialize()` in the original driver.
+/// Register values that differ between panel sizes, pulled out of
+/// `_initialize()` in the original driver.
 pub(crate) struct SizeParams {
     pub clock_div_ratio: u8,
     pub multiplex: u8,
@@ -21,7 +21,7 @@ pub(crate) struct SizeParams {
 }
 
 impl DisplaySize {
-    // Width and height in pixels.
+    /// Width and height in pixels.
     pub fn dimensions(&self) -> (u32, u32) {
         match self {
             DisplaySize::Size128x64 => (128, 64),

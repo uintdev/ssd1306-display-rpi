@@ -4,23 +4,23 @@ use crate::size::DisplaySize;
 use embedded_hal::delay::DelayNs;
 use embedded_hal::digital::{ErrorType, OutputPin};
 
-// Charge pump power source, mirroring `SSD1306_EXTERNALVCC` /
-// `SSD1306_SWITCHCAPVCC` in the original driver. Most breakout boards
-// (and the Python driver's default) use `SwitchCap`.
+/// Charge pump power source, mirroring `SSD1306_EXTERNALVCC` /
+/// `SSD1306_SWITCHCAPVCC` in the original driver. Most breakout boards
+/// (and the Python driver's default) use `SwitchCap`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VccState {
-    // Display is powered from an external VCC supply.
+    /// Display is powered from an external VCC supply.
     External,
-    // Display uses its internal charge pump (the common case).
+    /// Display uses its internal charge pump (the common case).
     SwitchCap,
 }
 
-// A no-op GPIO pin, used when a display's reset line isn't wired up.
-//
-// Some SSD1306 boards (especially small I2C ones) tie reset to the
-// microcontroller's own reset line and don't expose a separate pin; this
-// lets [`Ssd1306::new_without_reset`] skip the reset pulse instead of
-// requiring a dummy pin from the caller.
+/// A no-op GPIO pin, used when a display's reset line isn't wired up.
+///
+/// Some SSD1306 boards (especially small I2C ones) tie reset to the
+/// microcontroller's own reset line and don't expose a separate pin; this
+/// lets [`Ssd1306::new_without_reset`] skip the reset pulse instead of
+/// requiring a dummy pin from the caller.
 #[derive(Debug, Default)]
 pub struct NoResetPin;
 
@@ -38,15 +38,15 @@ impl OutputPin for NoResetPin {
     }
 }
 
-// Error returned by [`Ssd1306::set_buffer`] when the supplied slice
-// doesn't match the display's buffer size.
+/// Error returned by [`Ssd1306::set_buffer`] when the supplied slice
+/// doesn't match the display's buffer size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BufferError {
-    // The supplied buffer had the wrong length.
+    /// The supplied buffer had the wrong length.
     WrongSize {
-        // Expected length (`width * height / 8` bytes).
+        /// Expected length (`width * height / 8` bytes).
         expected: usize,
-        // Length actually supplied.
+        /// Length actually supplied.
         actual: usize,
     },
 }
@@ -64,8 +64,8 @@ impl core::fmt::Display for BufferError {
 
 impl std::error::Error for BufferError {}
 
-// `I` is the transport ([`crate::I2cInterface`] or [`crate::SpiInterface`])
-// and `RST` is the (optional) reset pin's type.
+/// `I` is the transport ([`crate::I2cInterface`] or [`crate::SpiInterface`])
+/// and `RST` is the (optional) reset pin's type.
 pub struct Ssd1306<I, RST = NoResetPin> {
     interface: I,
     reset_pin: Option<RST>,
@@ -81,8 +81,8 @@ impl<I> Ssd1306<I, NoResetPin>
 where
     I: DisplayInterface,
 {
-    // Create a driver for a display whose reset line isn't connected to a
-    // controllable GPIO pin.
+    /// Create a driver for a display whose reset line isn't connected to a
+    /// controllable GPIO pin.
     pub fn new_without_reset(interface: I, size: DisplaySize) -> Self {
         Self::new(interface, size, None)
     }
@@ -113,17 +113,19 @@ where
         }
     }
 
-    // Consume the driver and return the underlying transport (and reset
-    // pin, if one was configured), e.g. to reuse the bus for something
-    // else or to inspect a mock in tests.
+    /// Consume the driver and return the underlying transport (and reset
+    /// pin, if one was configured), e.g. to reuse the bus for something
+    /// else or to inspect a mock in tests.
     pub fn release(self) -> (I, Option<RST>) {
         (self.interface, self.reset_pin)
     }
 
-    // Display width and height in pixels
+    /// Display width in pixels.
     pub fn width(&self) -> u32 {
         self.width
     }
+
+    /// Display height in pixels.
     pub fn height(&self) -> u32 {
         self.height
     }
@@ -166,7 +168,7 @@ where
         ])
     }
 
-    // Push the in-memory frame buffer to the physical display.
+    /// Push the in-memory frame buffer to the physical display.
     pub fn flush(&mut self) -> Result<(), I::Error> {
         self.interface.commands(&[
             COLUMNADDR,
@@ -179,14 +181,14 @@ where
         self.interface.data(&self.buffer)
     }
 
-    // Zero the in-memory frame buffer. Call [`Ssd1306::flush`] afterwards
-    // to clear the physical display.
+    /// Zero the in-memory frame buffer. Call [`Ssd1306::flush`] afterwards
+    /// to clear the physical display.
     pub fn clear(&mut self) {
         self.buffer.iter_mut().for_each(|b| *b = 0);
     }
 
-    // Set (or clear) a single pixel in the frame buffer. Call
-    // [`Ssd1306::flush`] to send the change to the display.
+    /// Set (or clear) a single pixel in the frame buffer. Call
+    /// [`Ssd1306::flush`] to send the change to the display.
     pub fn set_pixel(&mut self, x: u32, y: u32, on: bool) {
         if x >= self.width || y >= self.height {
             return;
@@ -201,7 +203,7 @@ where
         }
     }
 
-    // Read back whether a pixel in the frame buffer is set.
+    /// Read back whether a pixel in the frame buffer is set.
     pub fn get_pixel(&self, x: u32, y: u32) -> bool {
         if x >= self.width || y >= self.height {
             return false;
@@ -212,9 +214,9 @@ where
         self.buffer[index] & (1 << bit) != 0
     }
 
-    // Overwrite the whole frame buffer with already page-packed data
-    // (`width * height / 8` bytes, same layout the display expects on the
-    // wire).
+    /// Overwrite the whole frame buffer with already page-packed data
+    /// (`width * height / 8` bytes, same layout the display expects on the
+    /// wire).
     pub fn set_buffer(&mut self, data: &[u8]) -> Result<(), BufferError> {
         if data.len() != self.buffer.len() {
             return Err(BufferError::WrongSize {
@@ -226,23 +228,23 @@ where
         Ok(())
     }
 
-    // Borrow the raw frame buffer
+    /// Borrow the raw frame buffer
     pub fn buffer(&self) -> &[u8] {
         &self.buffer
     }
 
-    // Mutably borrow the raw frame buffer for direct manipulation.
+    /// Mutably borrow the raw frame buffer for direct manipulation.
     pub fn buffer_mut(&mut self) -> &mut [u8] {
         &mut self.buffer
     }
 
-    // Set display contrast, from 0 to 255.
+    /// Set display contrast, from 0 to 255.
     pub fn set_contrast(&mut self, contrast: u8) -> Result<(), I::Error> {
         self.interface.commands(&[SETCONTRAST, contrast])
     }
 
-    // Dim the display, or restore normal brightness if `dim` is `false`.
-    // Equivalent to the original driver's `dim()`.
+    /// Dim the display, or restore normal brightness if `dim` is `false`.
+    /// Equivalent to the original driver's `dim()`.
     pub fn dim(&mut self, dim: bool) -> Result<(), I::Error> {
         let contrast: u8 = if dim {
             0
@@ -254,30 +256,30 @@ where
         self.set_contrast(contrast)
     }
 
-    // Turn the whole display on regardless of buffer contents (`0xA5`).
+    /// Turn the whole display on regardless of buffer contents (`0xA5`).
     pub fn display_all_on(&mut self) -> Result<(), I::Error> {
         self.interface.command(DISPLAYALLON)
     }
 
-    // Resume displaying frame buffer contents after [`Ssd1306::display_all_on`]
-    // (`0xA4`).
+    /// Resume displaying frame buffer contents after [`Ssd1306::display_all_on`]
+    /// (`0xA4`).
     pub fn display_all_on_resume(&mut self) -> Result<(), I::Error> {
         self.interface.command(DISPLAYALLON_RESUME)
     }
 
-    // Invert the display (swap on/off pixels) without touching the buffer.
+    /// Invert the display (swap on/off pixels) without touching the buffer.
     pub fn invert(&mut self, invert: bool) -> Result<(), I::Error> {
         self.interface
             .command(if invert { INVERTDISPLAY } else { NORMALDISPLAY })
     }
 
-    // Turn the physical display panel off (low power mode). The frame
-    // buffer is preserved and will reappear on the next [`Ssd1306::on`].
+    /// Turn the physical display panel off (low power mode). The frame
+    /// buffer is preserved and will reappear on the next [`Ssd1306::on`].
     pub fn off(&mut self) -> Result<(), I::Error> {
         self.interface.command(DISPLAYOFF)
     }
 
-    // Turn the physical display panel back on.
+    /// Turn the physical display panel back on.
     pub fn on(&mut self) -> Result<(), I::Error> {
         self.interface.command(DISPLAYON)
     }
@@ -289,14 +291,14 @@ where
     I: DisplayInterface,
     RST: OutputPin,
 {
-    // Create a driver with a reset pin wired up.
+    /// Create a driver with a reset pin wired up.
     pub fn new_with_reset(interface: I, size: DisplaySize, reset_pin: RST) -> Self {
         Self::new(interface, size, Some(reset_pin))
     }
 
-    // Pulse the reset pin (high, then low for 10ms, then high again), as
-    // done in the original driver's `reset()`. A no-op if this display was
-    // constructed with [`Ssd1306::new_without_reset`].
+    /// Pulse the reset pin (high, then low for 10ms, then high again), as
+    /// done in the original driver's `reset()`. A no-op if this display was
+    /// constructed with [`Ssd1306::new_without_reset`].
     pub fn reset(&mut self, delay: &mut impl DelayNs) {
         if let Some(rst) = self.reset_pin.as_mut() {
             let _ = rst.set_high();
@@ -307,7 +309,7 @@ where
         }
     }
 
-    // Reset, run the size-specific initialization sequence, and turn the display on.
+    /// Reset, run the size-specific initialization sequence, and turn the display on.
     pub fn init(&mut self, vcc_state: VccState, delay: &mut impl DelayNs) -> Result<(), I::Error> {
         self.vcc_state = vcc_state;
         self.reset(delay);

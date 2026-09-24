@@ -1,4 +1,5 @@
-// Raw SSD1306 command bytes
+//! Raw SSD1306 command bytes
+
 pub const SETCONTRAST: u8 = 0x81;
 pub const DISPLAYALLON_RESUME: u8 = 0xA4;
 pub const DISPLAYALLON: u8 = 0xA5;
@@ -32,5 +33,5 @@ pub const LEFT_HORIZONTAL_SCROLL: u8 = 0x27;
 pub const VERTICAL_AND_RIGHT_HORIZONTAL_SCROLL: u8 = 0x29;
 pub const VERTICAL_AND_LEFT_HORIZONTAL_SCROLL: u8 = 0x2A;
 
-// Default I2C address (011110+SA0+RW - 0x3C or 0x3D)
+/// Default I2C address (011110+SA0+RW - 0x3C or 0x3D)
 pub const DEFAULT_I2C_ADDRESS: u8 = 0x3C;
