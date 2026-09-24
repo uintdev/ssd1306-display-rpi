@@ -31,6 +31,15 @@ fn run_shell(cmd: &str) -> String {
         .unwrap_or_default()
 }
 
+// 1-minute load average: the first field of /proc/loadavg. Read directly
+// rather than via `cut` to avoid spawning a shell every refresh.
+fn read_load_average() -> String {
+    fs::read_to_string("/proc/loadavg")
+        .ok()
+        .and_then(|s| s.split(' ').next().map(|field| field.trim().to_string()))
+        .unwrap_or_default()
+}
+
 fn sleep_checking_display_off<I>(
     display: &mut Ssd1306<I>,
     total: Duration,
@@ -151,12 +160,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Monitoring information
         let time_str: String = run_shell("date +\"%H:%M\"");
         let ip: String = run_shell("hostname -I | cut -d' ' -f1");
-        let cpu: String = run_shell("cut -f 1 -d ' ' /proc/loadavg");
+        let cpu: String = read_load_average();
         let mem_usage: String = run_shell(
             "free -m | awk 'NR==2{printf \"Mem: %s / %s MB  %.2f%%\", $3,$2,$3*100/$2 }'",
         );
         let disk: String =
-            run_shell("df -h | awk '$NF==\"/\"{printf \"Disk: %d / %d GB  %s\", $3,$2,$5}'");
+            run_shell("df -h / | awk '$NF==\"/\"{printf \"Disk: %d / %d GB  %s\", $3,$2,$5}'");
 
         Text::with_text_style(&time_str, Point::new(width - 30, 0), status_font, top_left)
             .draw(&mut display)?;
