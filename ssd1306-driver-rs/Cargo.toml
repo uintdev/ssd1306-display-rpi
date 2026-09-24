@@ -1,11 +1,11 @@
 [package]
 name = "ssd1306-driver-rs"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
 
 [dependencies]
-embedded-hal = "1.0"
-embedded-graphics = { version = "0.8.2", optional = true }
+embedded-hal = { workspace = true }
+embedded-graphics = { workspace = true, optional = true }
 
 [features]
 graphics = ["dep:embedded-graphics"]

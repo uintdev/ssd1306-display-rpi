@@ -139,7 +139,6 @@ name = "ssd1306-sysinfo-display"
 version = "0.1.0"
 dependencies = [
  "embedded-graphics",
- "embedded-hal",
  "rppal",
  "ssd1306-driver-rs",
 ]

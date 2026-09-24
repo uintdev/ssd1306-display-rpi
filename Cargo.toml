@@ -1,3 +1,10 @@
 [workspace]
 resolver = "2"
 members = ["ssd1306-driver-rs", "ssd1306-sysinfo-display"]
+
+[workspace.package]
+edition = "2024"
+
+[workspace.dependencies]
+embedded-hal = "1.0"
+embedded-graphics = "0.8.2"
