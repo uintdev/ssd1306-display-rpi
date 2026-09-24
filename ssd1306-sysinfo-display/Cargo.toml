@@ -8,3 +8,4 @@ description = "Port of Adafruit's SSD1306 Python driver and sysinfo example"
 ssd1306-driver-rs = { path = "../ssd1306-driver-rs", features = ["graphics"] }
 embedded-graphics = { workspace = true }
 rppal = { version = "0.22.1", features = ["embedded-hal"] }
+signal-hook = "0.4.4"

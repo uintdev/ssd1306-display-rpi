@@ -1,10 +1,11 @@
-use std::convert::Infallible;
 use std::env;
 use std::error::Error;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -19,6 +20,7 @@ use embedded_graphics::{
 };
 use rppal::hal::Delay;
 use rppal::i2c::I2c;
+use signal_hook::{consts::TERM_SIGNALS, flag};
 use ssd1306_driver_rs::{
     DisplayInterface, DisplaySize, I2cInterface, Ssd1306, VccState, command::DEFAULT_I2C_ADDRESS,
 };
@@ -84,12 +86,13 @@ fn sleep_checking_display_off<I>(
     display: &mut Ssd1306<I>,
     total: Duration,
     display_off_file: &Path,
+    shutdown: &AtomicBool,
 ) -> Result<bool, I::Error>
 where
     I: DisplayInterface,
 {
     let mut waited: Duration = Duration::ZERO;
-    while waited < total {
+    while waited < total && !shutdown.load(Ordering::Relaxed) {
         if display_off_file.is_file() {
             turn_display_off(display)?;
             return Ok(true);
@@ -103,6 +106,15 @@ where
 
 fn main() -> Result<(), Box<dyn Error>> {
     println!("--- SSD1306 SysInfo Display ---\n");
+
+    // Stop cleanly on SIGTERM/SIGINT/SIGQUIT (e.g. `systemctl stop`, Ctrl-C)
+    // so the panel can be switched off instead of freezing on the last
+    // frame. A second signal exits immediately, in case shutdown hangs.
+    let shutdown: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+    for &signal in TERM_SIGNALS {
+        flag::register_conditional_shutdown(signal, 1, Arc::clone(&shutdown))?;
+        flag::register(signal, Arc::clone(&shutdown))?;
+    }
 
     // Look for the flag and message files next to the binary.
     let base_path: PathBuf = env::current_exe()?
@@ -131,9 +143,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         Ssd1306::new_without_reset(interface, DisplaySize::Size128x32);
     display.init(VccState::SwitchCap, &mut Delay)?;
 
-    loop {
-        let Err(err) = run(&mut display, &display_off_file, &msg_file);
-
+    while let Err(err) = run(&mut display, &display_off_file, &msg_file, &shutdown) {
         // An I2C error usually means the panel was disconnected or lost
         // power (which also wipes its configuration), so keep trying to
         // reinitialise it rather than exiting. Anything else is fatal.
@@ -143,20 +153,33 @@ fn main() -> Result<(), Box<dyn Error>> {
         eprintln!("I2C error: {i2c_err}; retrying every {I2C_RETRY_INTERVAL:?}");
         loop {
             thread::sleep(I2C_RETRY_INTERVAL);
+            if shutdown.load(Ordering::Relaxed) {
+                // The display isn't responding, so there's nothing to turn off.
+                println!("Shutting down");
+                return Ok(());
+            }
             if display.init(VccState::SwitchCap, &mut Delay).is_ok() {
                 eprintln!("Display reinitialised");
                 break;
             }
         }
     }
+
+    // Shutdown requested: switch the panel off rather than leaving the last
+    // frame on screen.
+    println!("Shutting down");
+    turn_display_off(&mut display)?;
+    Ok(())
 }
 
-// Draw the status screen (or a message) in a loop. Only returns on error.
+// Draw the status screen (or a message) in a loop. Returns `Ok` once
+// shutdown is requested, or the first error.
 fn run(
     display: &mut Ssd1306<I2cInterface<I2c>>,
     display_off_file: &Path,
     msg_file: &Path,
-) -> Result<Infallible, Box<dyn Error>> {
+    shutdown: &AtomicBool,
+) -> Result<(), Box<dyn Error>> {
     display.clear();
     display.flush()?;
 
@@ -185,7 +208,7 @@ fn run(
     // so the same message isn't shown again on every loop.
     let mut undeletable_msg_modified: Option<SystemTime> = None;
 
-    loop {
+    while !shutdown.load(Ordering::Relaxed) {
         display.clear();
 
         // Keep the display off while the flag file exists
@@ -232,7 +255,7 @@ fn run(
                 modified_time(msg_file)
             };
             display_off_status |=
-                sleep_checking_display_off(display, MESSAGE_DURATION, display_off_file)?;
+                sleep_checking_display_off(display, MESSAGE_DURATION, display_off_file, shutdown)?;
             continue;
         }
 
@@ -263,6 +286,7 @@ fn run(
 
         display.flush()?;
         display_off_status |=
-            sleep_checking_display_off(display, REFRESH_INTERVAL, display_off_file)?;
+            sleep_checking_display_off(display, REFRESH_INTERVAL, display_off_file, shutdown)?;
     }
+    Ok(())
 }
