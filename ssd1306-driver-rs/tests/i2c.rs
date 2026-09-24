@@ -110,6 +110,23 @@ fn check_dim(size: DisplaySize, e: &Expected, vcc: VccState) {
     });
 }
 
+fn check_dim_custom_contrast(size: DisplaySize, e: &Expected) {
+    // After set_contrast, undimming returns to that value, not the default.
+    let mut expected = init_transactions(e, VccState::SwitchCap);
+    expected.push(cmds(&[0x81, 0x42])); // set_contrast(0x42)
+    expected.push(cmds(&[0x81, 0x00])); // dim(true)
+    expected.push(cmds(&[0x81, 0x42])); // dim(false)
+
+    with_display(size, &expected, |display| {
+        display
+            .init(VccState::SwitchCap, &mut NoopDelay::new())
+            .unwrap();
+        display.set_contrast(0x42).unwrap();
+        display.dim(true).unwrap();
+        display.dim(false).unwrap();
+    });
+}
+
 fn check_flush(size: DisplaySize, e: &Expected) {
     // A distinct value per byte, so misordered or dropped data is caught.
     let len: usize = (e.width * e.height / 8) as usize;
@@ -222,6 +239,11 @@ macro_rules! size_tests {
             #[test]
             fn dim_restores_init_contrast_external_vcc() {
                 check_dim(SIZE, &EXPECTED, VccState::External);
+            }
+
+            #[test]
+            fn dim_restores_custom_contrast() {
+                check_dim_custom_contrast(SIZE, &EXPECTED);
             }
 
             #[test]

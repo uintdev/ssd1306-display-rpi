@@ -102,6 +102,8 @@ pub struct Ssd1306<I, RST = NoResetPin> {
     height: u32,
     buffer: Vec<u8>,
     vcc_state: VccState,
+    /// Normal (undimmed) contrast, restored by `dim(false)`.
+    contrast: u8,
 }
 
 impl<I> Ssd1306<I, NoResetPin>
@@ -136,6 +138,7 @@ where
             height,
             buffer,
             vcc_state: VccState::SwitchCap,
+            contrast: size.params().contrast_internal,
         }
     }
 
@@ -169,7 +172,9 @@ where
     fn initialize(&mut self) -> Result<(), I::Error> {
         let p = self.size.params();
         let external: bool = self.vcc_state == VccState::External;
-        let contrast: u8 = self.default_contrast();
+        // Initialization resets any contrast set with `set_contrast`.
+        self.contrast = self.default_contrast();
+        let contrast: u8 = self.contrast;
 
         self.interface.commands(&[
             DISPLAYOFF,
@@ -274,16 +279,20 @@ where
         &mut self.buffer
     }
 
-    /// Set display contrast, from 0 to 255.
+    /// Set display contrast, from 0 to 255. This also becomes the contrast
+    /// that [`Ssd1306::dim`] restores, until the next [`Ssd1306::init`].
     pub fn set_contrast(&mut self, contrast: u8) -> Result<(), I::Error> {
-        self.interface.commands(&[SETCONTRAST, contrast])
+        self.interface.commands(&[SETCONTRAST, contrast])?;
+        self.contrast = contrast;
+        Ok(())
     }
 
-    /// Dim the display, or restore the contrast set by [`Ssd1306::init`]
-    /// if `dim` is `false`.
+    /// Dim the display, or restore normal contrast if `dim` is `false`.
+    /// Normal contrast is the last value passed to [`Ssd1306::set_contrast`],
+    /// or the panel's default after [`Ssd1306::init`].
     pub fn dim(&mut self, dim: bool) -> Result<(), I::Error> {
-        let contrast: u8 = if dim { 0 } else { self.default_contrast() };
-        self.set_contrast(contrast)
+        let contrast: u8 = if dim { 0 } else { self.contrast };
+        self.interface.commands(&[SETCONTRAST, contrast])
     }
 
     /// Turn the whole display on regardless of buffer contents (`0xA5`).
