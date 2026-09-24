@@ -21,6 +21,10 @@ use ssd1306_driver_rs::{
 };
 
 const DISPLAY_OFF_POLL_INTERVAL: Duration = Duration::from_millis(100);
+// How long a message from msg.txt stays on screen.
+const MESSAGE_DURATION: Duration = Duration::from_secs(3);
+// Delay between system information refreshes.
+const REFRESH_INTERVAL: Duration = Duration::from_millis(500);
 // How often to re-query values that rarely change (IP address, disk usage).
 // Time, CPU load and memory are still refreshed on every loop.
 const SLOW_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
@@ -132,9 +136,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             thread::sleep(DISPLAY_OFF_POLL_INTERVAL);
             continue;
-        } else if display_off_status {
-            display_off_status = false;
         }
+        display_off_status = false;
 
         // Show a one-off message from msg.txt, if present
         if msg_file.is_file() {
@@ -157,10 +160,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             display.flush()?;
 
             fs::remove_file(&msg_file)?;
-            if sleep_checking_display_off(&mut display, Duration::from_secs(3), &display_off_file)?
-            {
-                display_off_status = true;
-            }
+            display_off_status |=
+                sleep_checking_display_off(&mut display, MESSAGE_DURATION, &display_off_file)?;
             continue;
         }
 
@@ -171,41 +172,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "free -m | awk 'NR==2{printf \"Mem: %s / %s MB  %.2f%%\", $3,$2,$3*100/$2 }'",
         );
         // Also retry while the IP is empty (e.g. network not up yet at boot).
-        if ip.is_empty()
-            || last_slow_refresh.is_none_or(|t| t.elapsed() >= SLOW_REFRESH_INTERVAL)
-        {
+        if ip.is_empty() || last_slow_refresh.is_none_or(|t| t.elapsed() >= SLOW_REFRESH_INTERVAL) {
             ip = run_shell("hostname -I | cut -d' ' -f1");
-            disk = run_shell(
-                "df -h / | awk '$NF==\"/\"{printf \"Disk: %d / %d GB  %s\", $3,$2,$5}'",
-            );
+            disk =
+                run_shell("df -h / | awk '$NF==\"/\"{printf \"Disk: %d / %d GB  %s\", $3,$2,$5}'");
             last_slow_refresh = Some(Instant::now());
         }
 
-        Text::with_text_style(&time_str, Point::new(width - 30, 0), status_font, top_left)
-            .draw(&mut display)?;
-        Text::with_text_style(
-            &format!("IP: {ip}"),
-            Point::new(0, 0),
-            status_font,
-            top_left,
-        )
-        .draw(&mut display)?;
-        Text::with_text_style(
-            &format!("CPU load: {cpu}"),
-            Point::new(0, 8),
-            status_font,
-            top_left,
-        )
-        .draw(&mut display)?;
-        Text::with_text_style(&mem_usage, Point::new(0, 16), status_font, top_left)
-            .draw(&mut display)?;
-        Text::with_text_style(&disk, Point::new(0, 25), status_font, top_left)
-            .draw(&mut display)?;
+        let lines: [(&str, Point); 5] = [
+            (&time_str, Point::new(width - 30, 0)),
+            (&format!("IP: {ip}"), Point::new(0, 0)),
+            (&format!("CPU load: {cpu}"), Point::new(0, 8)),
+            (&mem_usage, Point::new(0, 16)),
+            (&disk, Point::new(0, 25)),
+        ];
+        for (text, position) in lines {
+            Text::with_text_style(text, position, status_font, top_left).draw(&mut display)?;
+        }
 
         display.flush()?;
-        if sleep_checking_display_off(&mut display, Duration::from_millis(500), &display_off_file)?
-        {
-            display_off_status = true;
-        }
+        display_off_status |=
+            sleep_checking_display_off(&mut display, REFRESH_INTERVAL, &display_off_file)?;
     }
 }
