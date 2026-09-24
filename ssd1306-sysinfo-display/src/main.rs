@@ -2,10 +2,11 @@ use std::convert::Infallible;
 use std::env;
 use std::error::Error;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use embedded_graphics::{
     mono_font::{
@@ -49,6 +50,23 @@ fn read_load_average() -> String {
         .ok()
         .and_then(|s| s.split(' ').next().map(|field| field.trim().to_string()))
         .unwrap_or_default()
+}
+
+// Remove `path`, logging errors rather than failing on them. A file that's
+// already gone counts as removed.
+fn try_remove_file(path: &Path) -> bool {
+    match fs::remove_file(path) {
+        Ok(()) => true,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => true,
+        Err(e) => {
+            eprintln!("Could not remove {}: {e}", path.display());
+            false
+        }
+    }
+}
+
+fn modified_time(path: &Path) -> Option<SystemTime> {
+    fs::metadata(path).and_then(|m| m.modified()).ok()
 }
 
 // Blank the panel's memory (so nothing stale reappears when it is switched
@@ -102,7 +120,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Always show the display on boot
     if display_off_file.is_file() {
-        fs::remove_file(&display_off_file)?;
+        try_remove_file(&display_off_file);
     }
 
     // Create the I2C interface and the SSD1306 driver. Change the size
@@ -163,6 +181,9 @@ fn run(
     let mut ip: String = String::new();
     let mut disk: String = String::new();
     let mut last_slow_refresh: Option<Instant> = None;
+    // Modification time of a msg.txt that was shown but couldn't be removed,
+    // so the same message isn't shown again on every loop.
+    let mut undeletable_msg_modified: Option<SystemTime> = None;
 
     loop {
         display.clear();
@@ -181,8 +202,10 @@ fn run(
             display_off_status = false;
         }
 
-        // Show a one-off message from msg.txt, if present
-        if msg_file.is_file() {
+        // Show a one-off message from msg.txt, if present and not already shown
+        let msg_already_shown: bool =
+            undeletable_msg_modified.is_some_and(|shown| modified_time(msg_file) == Some(shown));
+        if msg_file.is_file() && !msg_already_shown {
             let content: String = fs::read_to_string(msg_file)
                 .unwrap_or_default()
                 .lines()
@@ -201,7 +224,11 @@ fn run(
                 .draw(display)?;
             display.flush()?;
 
-            fs::remove_file(msg_file)?;
+            undeletable_msg_modified = if try_remove_file(msg_file) {
+                None
+            } else {
+                modified_time(msg_file)
+            };
             display_off_status |=
                 sleep_checking_display_off(display, MESSAGE_DURATION, display_off_file)?;
             continue;
