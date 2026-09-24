@@ -8,3 +8,10 @@ edition = "2024"
 [workspace.dependencies]
 embedded-hal = "1.0"
 embedded-graphics = "0.8.2"
+
+# Smaller, faster release binary, at the cost of slower release builds.
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"
