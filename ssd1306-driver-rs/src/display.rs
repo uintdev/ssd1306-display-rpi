@@ -126,15 +126,20 @@ where
         self.height
     }
 
-    fn initialize(&mut self) -> Result<(), I::Error> {
+    /// Normal (undimmed) contrast for this panel size and VCC source.
+    fn default_contrast(&self) -> u8 {
         let p = self.size.params();
-        let external: bool = self.vcc_state == VccState::External;
-
-        let contrast: u8 = if external {
+        if self.vcc_state == VccState::External {
             p.contrast_external
         } else {
             p.contrast_internal
-        };
+        }
+    }
+
+    fn initialize(&mut self) -> Result<(), I::Error> {
+        let p = self.size.params();
+        let external: bool = self.vcc_state == VccState::External;
+        let contrast: u8 = self.default_contrast();
 
         self.interface.commands(&[
             DISPLAYOFF,
@@ -244,15 +249,10 @@ where
         self.interface.commands(&[SETCONTRAST, contrast])
     }
 
-    /// Dim the display, or restore normal brightness if `dim` is `false`.
+    /// Dim the display, or restore the contrast set by [`Ssd1306::init`]
+    /// if `dim` is `false`.
     pub fn dim(&mut self, dim: bool) -> Result<(), I::Error> {
-        let contrast: u8 = if dim {
-            0
-        } else if self.vcc_state == VccState::External {
-            0x9F
-        } else {
-            0xCF
-        };
+        let contrast: u8 = if dim { 0 } else { self.default_contrast() };
         self.set_contrast(contrast)
     }
 

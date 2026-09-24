@@ -42,12 +42,22 @@ fn with_display(
     interface.release().done();
 }
 
-fn check_init_sequence(size: DisplaySize, e: &Expected, vcc: VccState) {
-    // With an external VCC supply, the charge-pump, precharge, and contrast
-    // bytes all switch to their "external" values (contrast only differs
-    // for 128x64: 0xCF internal vs 0x9F external).
+// Normal (undimmed) contrast for a panel size and VCC source. Only 128x64
+// differs by VCC source: 0xCF internal vs 0x9F external.
+fn expected_contrast(e: &Expected, vcc: VccState) -> u8 {
+    if vcc == VccState::External {
+        e.contrast_external
+    } else {
+        e.contrast_internal
+    }
+}
+
+// Transactions sent by `init()`. With an external VCC supply, the
+// charge-pump, precharge, and contrast bytes all switch to their "external"
+// values.
+fn init_transactions(e: &Expected, vcc: VccState) -> Vec<I2cTransaction> {
     let external: bool = vcc == VccState::External;
-    let expected = vec![
+    vec![
         // Init sequence, sent as one batched write.
         cmds(&[
             0xAE, // DISPLAYOFF
@@ -67,11 +77,7 @@ fn check_init_sequence(size: DisplaySize, e: &Expected, vcc: VccState) {
             0xDA, // SETCOMPINS
             e.com_pins,
             0x81, // SETCONTRAST
-            if external {
-                e.contrast_external
-            } else {
-                e.contrast_internal
-            },
+            expected_contrast(e, vcc),
             0xD9, // SETPRECHARGE
             if external { 0x22 } else { 0xF1 },
             0xDB, // SETVCOMDETECT
@@ -80,10 +86,26 @@ fn check_init_sequence(size: DisplaySize, e: &Expected, vcc: VccState) {
             0xA6, // NORMALDISPLAY
         ]),
         cmd(0xAF), // DISPLAYON
-    ];
+    ]
+}
+
+fn check_init_sequence(size: DisplaySize, e: &Expected, vcc: VccState) {
+    with_display(size, &init_transactions(e, vcc), |display| {
+        display.init(vcc, &mut NoopDelay::new()).unwrap();
+    });
+}
+
+fn check_dim(size: DisplaySize, e: &Expected, vcc: VccState) {
+    // Dimming drops contrast to 0; undimming restores the same size- and
+    // VCC-specific contrast that init() set.
+    let mut expected = init_transactions(e, vcc);
+    expected.push(cmds(&[0x81, 0x00]));
+    expected.push(cmds(&[0x81, expected_contrast(e, vcc)]));
 
     with_display(size, &expected, |display| {
         display.init(vcc, &mut NoopDelay::new()).unwrap();
+        display.dim(true).unwrap();
+        display.dim(false).unwrap();
     });
 }
 
@@ -189,6 +211,16 @@ macro_rules! size_tests {
             #[test]
             fn init_sequence_external_vcc() {
                 check_init_sequence(SIZE, &EXPECTED, VccState::External);
+            }
+
+            #[test]
+            fn dim_restores_init_contrast_switchcap() {
+                check_dim(SIZE, &EXPECTED, VccState::SwitchCap);
+            }
+
+            #[test]
+            fn dim_restores_init_contrast_external_vcc() {
+                check_dim(SIZE, &EXPECTED, VccState::External);
             }
 
             #[test]
