@@ -1,4 +1,6 @@
+use std::convert::Infallible;
 use std::env;
+use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -28,6 +30,8 @@ const REFRESH_INTERVAL: Duration = Duration::from_millis(500);
 // How often to re-query values that rarely change (IP address, disk usage).
 // Time, CPU load and memory are still refreshed on every loop.
 const SLOW_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
+// How often to try reinitialising the display after an I2C error.
+const I2C_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 
 fn run_shell(cmd: &str) -> String {
     Command::new("sh")
@@ -79,7 +83,7 @@ where
     Ok(false)
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
     println!("--- SSD1306 SysInfo Display ---\n");
 
     // Look for the flag and message files next to the binary.
@@ -109,6 +113,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ssd1306::new_without_reset(interface, DisplaySize::Size128x32);
     display.init(VccState::SwitchCap, &mut Delay)?;
 
+    loop {
+        let Err(err) = run(&mut display, &display_off_file, &msg_file);
+
+        // An I2C error usually means the panel was disconnected or lost
+        // power (which also wipes its configuration), so keep trying to
+        // reinitialise it rather than exiting. Anything else is fatal.
+        let Some(i2c_err) = err.downcast_ref::<rppal::i2c::Error>() else {
+            return Err(err);
+        };
+        eprintln!("I2C error: {i2c_err}; retrying every {I2C_RETRY_INTERVAL:?}");
+        loop {
+            thread::sleep(I2C_RETRY_INTERVAL);
+            if display.init(VccState::SwitchCap, &mut Delay).is_ok() {
+                eprintln!("Display reinitialised");
+                break;
+            }
+        }
+    }
+}
+
+// Draw the status screen (or a message) in a loop. Only returns on error.
+fn run(
+    display: &mut Ssd1306<I2cInterface<I2c>>,
+    display_off_file: &Path,
+    msg_file: &Path,
+) -> Result<Infallible, Box<dyn Error>> {
     display.clear();
     display.flush()?;
 
@@ -140,7 +170,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Keep the display off while the flag file exists
         if display_off_file.is_file() {
             if !display_off_status {
-                turn_display_off(&mut display)?;
+                turn_display_off(display)?;
                 display_off_status = true;
             }
             thread::sleep(DISPLAY_OFF_POLL_INTERVAL);
@@ -153,7 +183,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Show a one-off message from msg.txt, if present
         if msg_file.is_file() {
-            let content: String = fs::read_to_string(&msg_file)
+            let content: String = fs::read_to_string(msg_file)
                 .unwrap_or_default()
                 .lines()
                 .next()
@@ -168,12 +198,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             Text::with_text_style(&content, Point::new(width / 2, height / 2), font, centered)
-                .draw(&mut display)?;
+                .draw(display)?;
             display.flush()?;
 
-            fs::remove_file(&msg_file)?;
+            fs::remove_file(msg_file)?;
             display_off_status |=
-                sleep_checking_display_off(&mut display, MESSAGE_DURATION, &display_off_file)?;
+                sleep_checking_display_off(display, MESSAGE_DURATION, display_off_file)?;
             continue;
         }
 
@@ -199,11 +229,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             (&disk, Point::new(0, 25)),
         ];
         for (text, position) in lines {
-            Text::with_text_style(text, position, status_font, top_left).draw(&mut display)?;
+            Text::with_text_style(text, position, status_font, top_left).draw(display)?;
         }
 
         display.flush()?;
         display_off_status |=
-            sleep_checking_display_off(&mut display, REFRESH_INTERVAL, &display_off_file)?;
+            sleep_checking_display_off(display, REFRESH_INTERVAL, display_off_file)?;
     }
 }
