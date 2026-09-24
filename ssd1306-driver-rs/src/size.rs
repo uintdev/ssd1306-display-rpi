@@ -10,8 +10,7 @@ pub enum DisplaySize {
     Size96x16,
 }
 
-/// Register values that differ between panel sizes, pulled out of
-/// `_initialize()` in the original driver.
+/// Register values that differ between panel sizes.
 pub(crate) struct SizeParams {
     pub clock_div_ratio: u8,
     pub multiplex: u8,
@@ -32,7 +31,6 @@ impl DisplaySize {
 
     pub(crate) fn params(&self) -> SizeParams {
         match self {
-            // Values from SSD1306_128_64._initialize().
             DisplaySize::Size128x64 => SizeParams {
                 clock_div_ratio: 0x80,
                 multiplex: 0x3F,
@@ -40,7 +38,6 @@ impl DisplaySize {
                 contrast_internal: 0xCF,
                 contrast_external: 0x9F,
             },
-            // Values from SSD1306_128_32._initialize().
             DisplaySize::Size128x32 => SizeParams {
                 clock_div_ratio: 0x80,
                 multiplex: 0x1F,
@@ -48,7 +45,6 @@ impl DisplaySize {
                 contrast_internal: 0x8F,
                 contrast_external: 0x8F,
             },
-            // Values from SSD1306_96_16._initialize().
             DisplaySize::Size96x16 => SizeParams {
                 clock_div_ratio: 0x60,
                 multiplex: 0x0F,

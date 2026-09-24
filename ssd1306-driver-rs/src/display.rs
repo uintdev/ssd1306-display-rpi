@@ -4,9 +4,7 @@ use crate::size::DisplaySize;
 use embedded_hal::delay::DelayNs;
 use embedded_hal::digital::{ErrorType, OutputPin};
 
-/// Charge pump power source, mirroring `SSD1306_EXTERNALVCC` /
-/// `SSD1306_SWITCHCAPVCC` in the original driver. Most breakout boards
-/// (and the Python driver's default) use `SwitchCap`.
+/// Charge pump power source. Most breakout boards use `SwitchCap`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VccState {
     /// Display is powered from an external VCC supply.
@@ -150,7 +148,7 @@ where
             CHARGEPUMP,
             if external { 0x10 } else { 0x14 },
             MEMORYMODE,
-            0x00, // Act like ks0108.
+            0x00, // Horizontal addressing mode.
             SEGREMAP | 0x01,
             COMSCANDEC,
             SETCOMPINS,
@@ -247,7 +245,6 @@ where
     }
 
     /// Dim the display, or restore normal brightness if `dim` is `false`.
-    /// Equivalent to the original driver's `dim()`.
     pub fn dim(&mut self, dim: bool) -> Result<(), I::Error> {
         let contrast: u8 = if dim {
             0
@@ -299,9 +296,9 @@ where
         Self::new(interface, size, Some(reset_pin))
     }
 
-    /// Pulse the reset pin (high, then low for 10ms, then high again), as
-    /// done in the original driver's `reset()`. A no-op if this display was
-    /// constructed with [`Ssd1306::new_without_reset`].
+    /// Pulse the reset pin (high, then low for 10ms, then high again). A
+    /// no-op if this display was constructed with
+    /// [`Ssd1306::new_without_reset`].
     pub fn reset(&mut self, delay: &mut impl DelayNs) {
         if let Some(rst) = self.reset_pin.as_mut() {
             let _ = rst.set_high();

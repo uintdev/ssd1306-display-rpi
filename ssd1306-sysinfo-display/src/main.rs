@@ -72,8 +72,7 @@ where
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("--- SSD1306 SysInfo Display ---\n");
 
-    // The original resolved paths relative to the script's own directory;
-    // do the same relative to the compiled binary.
+    // Look for the flag and message files next to the binary.
     let base_path: PathBuf = env::current_exe()?
         .parent()
         .map(PathBuf::from)

@@ -23,14 +23,13 @@ pub trait DisplayInterface {
     fn data(&mut self, data: &[u8]) -> Result<(), Self::Error>;
 }
 
-/// Maximum payload bytes per I2C write (excluding the control byte). The
-/// original Python driver used 16 because of SMBus block-size limits; plain
-/// I2C writes (e.g. Linux i2c-dev, used by rppal) have no such limit, and
+/// Maximum payload bytes per I2C write (excluding the control byte). Plain
+/// I2C writes (e.g. Linux i2c-dev, used by rppal) have no inherent limit;
 /// 128 stays under the 255-byte cap common to many microcontroller HALs.
 const I2C_CHUNK_SIZE: usize = 128;
 
 /// I2C transport for the display (the common wiring for most SSD1306
-/// breakout boards, and the default used by the original Python driver).
+/// breakout boards).
 pub struct I2cInterface<I2C> {
     i2c: I2C,
     address: u8,
