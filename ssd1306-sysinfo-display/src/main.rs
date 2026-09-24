@@ -73,23 +73,29 @@ fn read_local_time() -> String {
     }
 }
 
-// Memory usage from `free -m`, as "Mem: <used> / <total> MB  <percent>%".
+// Memory usage from /proc/meminfo, as "Mem: <used> / <total> MB  <percent>%".
+// Used is total minus available, in whole MB, matching `free -m` (procps 4.x).
 fn read_memory_usage() -> String {
-    let Ok(output) = Command::new("free").arg("-m").output() else {
+    let Ok(meminfo) = fs::read_to_string("/proc/meminfo") else {
         return String::new();
     };
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let fields: Vec<&str> = stdout
-        .lines()
-        .nth(1)
-        .unwrap_or_default()
-        .split_whitespace()
-        .collect();
-    let (Some(total), Some(used)) = (fields.get(1), fields.get(2)) else {
+    // Value in kB of a line like "MemTotal:  948304 kB".
+    let field = |name: &str| -> Option<u64> {
+        meminfo.lines().find_map(|line| {
+            line.strip_prefix(name)?
+                .strip_prefix(':')?
+                .split_whitespace()
+                .next()?
+                .parse()
+                .ok()
+        })
+    };
+    let (Some(total_kb), Some(available_kb)) = (field("MemTotal"), field("MemAvailable")) else {
         return String::new();
     };
-    let percent: f64 =
-        used.parse::<f64>().unwrap_or(0.0) * 100.0 / total.parse::<f64>().unwrap_or(0.0);
+    let total: u64 = total_kb / 1024;
+    let used: u64 = total_kb.saturating_sub(available_kb) / 1024;
+    let percent: f64 = used as f64 * 100.0 / total as f64;
     format!("Mem: {used} / {total} MB  {percent:.2}%")
 }
 
