@@ -187,31 +187,36 @@ where
         self.buffer.iter_mut().for_each(|b| *b = 0);
     }
 
+    /// Locate a pixel in the frame buffer: the byte index and the bit mask
+    /// within that byte, or `None` if `(x, y)` is off-panel. Each byte is a
+    /// vertical column of 8 pixels within a page, LSB = top pixel.
+    fn pixel_location(&self, x: u32, y: u32) -> Option<(usize, u8)> {
+        if x >= self.width || y >= self.height {
+            return None;
+        }
+        let page: usize = (y / 8) as usize;
+        let mask: u8 = 1 << (y % 8);
+        let index: usize = page * self.width as usize + x as usize;
+        Some((index, mask))
+    }
+
     /// Set (or clear) a single pixel in the frame buffer. Call
     /// [`Ssd1306::flush`] to send the change to the display.
     pub fn set_pixel(&mut self, x: u32, y: u32, on: bool) {
-        if x >= self.width || y >= self.height {
+        let Some((index, mask)) = self.pixel_location(x, y) else {
             return;
-        }
-        let page = (y / 8) as usize;
-        let bit = (y % 8) as u8;
-        let index = page * self.width as usize + x as usize;
+        };
         if on {
-            self.buffer[index] |= 1 << bit;
+            self.buffer[index] |= mask;
         } else {
-            self.buffer[index] &= !(1 << bit);
+            self.buffer[index] &= !mask;
         }
     }
 
     /// Read back whether a pixel in the frame buffer is set.
     pub fn get_pixel(&self, x: u32, y: u32) -> bool {
-        if x >= self.width || y >= self.height {
-            return false;
-        }
-        let page: usize = (y / 8) as usize;
-        let bit: u8 = (y % 8) as u8;
-        let index: usize = page * self.width as usize + x as usize;
-        self.buffer[index] & (1 << bit) != 0
+        self.pixel_location(x, y)
+            .is_some_and(|(index, mask)| self.buffer[index] & mask != 0)
     }
 
     /// Overwrite the whole frame buffer with already page-packed data
