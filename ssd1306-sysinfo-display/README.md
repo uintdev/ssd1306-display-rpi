@@ -18,13 +18,15 @@ This displays the following system information:
 
 ### Turning off the display
 
-If you want to turn off the display visually, create a `displayoff` file in the same location as the executable. To turn it back on, remove the file or rerun the executable.
+To turn off the display, create a `displayoff` file in the same location as the executable. The screen is cleared and the panel is put to sleep, which saves power and avoids OLED burn-in. To turn it back on, remove the file or rerun the executable.
+
+Stopping the program (for example with Ctrl+C or `systemctl stop`) also turns the display off, rather than leaving the last screen showing.
 
 ### Displaying a brief message
 
 To show a temporary message (for example, to indicate a status change), create a `msg.txt` file in the same location as the executable, with the message as the text file’s content. As soon as the message is displayed, the text file will be automatically removed.
 
-By default, the message display duration is 3 seconds. This is configurable.
+By default, the message display duration is 3 seconds. To change it, update `MESSAGE_DURATION` in `src/main.rs`.
 
 ## Configuration
 
